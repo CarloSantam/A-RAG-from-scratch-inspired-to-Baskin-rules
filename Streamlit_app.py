@@ -10,7 +10,7 @@ import uuid
 # =========================
 
 st.set_page_config(
-    page_title="Baskin GPT",
+    page_title="A Rag Inspired to Baskin",
     page_icon="🏀",
     layout="centered"
 )
@@ -83,7 +83,7 @@ frasi, embeddings = load_data_and_emb()
 st.markdown(
     """
     <div style="font-size: 2em; font-weight: bold; display: flex; align-items: center;">
-        Baskin GPT
+        A Rag Inspired to Baskin
     </div>
     """,
     unsafe_allow_html=True
@@ -98,48 +98,57 @@ st.write(
     "https://eisi.it/sport/baskin/"
 )
 
-# User input
-query = st.text_input("Inserisci la tua domanda:")
+pwd = st.text_input("Inserisci la tua OPEN AI KEY:",type="password")
 
-# OpenAI model name
-model_llm_name = "gpt-5.1"
+if pwd==False:
+    
+    st.warning("Attenzione: inserisci la password.")
 
-
-# =========================
-# Run QA pipeline
-# =========================
-
-if query:
-    with st.spinner("Sto pensando..."):
-        try:
-            # Generate answer, retrieved context, and ranked chunks
-            answer, context, retrieved,query_emb,embeddings = baskin_gpt_core(
-                query=query,
-                frasi=frasi,
-                embeddings=embeddings,
-                model_emb=model,
-                model_llm_name=model_llm_name,
-                top_k=5,
-                min_similarity=0.2
-            )
-
-            # Show answer
-            st.subheader("Risposta")
-            st.markdown(answer)
-
-            # Optional debug / transparency section
-            with st.expander("Contesto recuperato"):
-                st.text(context)
-
-            with st.expander("Frasi più rilevanti"):
-                for i, (sentence, score) in enumerate(retrieved, start=1):
-                    st.write(f"{i}. **Score:** {score:.3f}")
-                    st.write(sentence)
-            
-            with st.expander("Grafico"):
-                fig=viz(query_emb,embeddings,query,retrieved)
+if pwd:
+    
+    # User input
+    query = st.text_input("Inserisci la tua domanda:")
+    
+    # OpenAI model name
+    model_llm_name = "gpt-5.1"
+    
+    
+    # =========================
+    # Run QA pipeline
+    # =========================
+    
+    if query:
+        with st.spinner("Sto pensando..."):
+            try:
+                # Generate answer, retrieved context, and ranked chunks
+                answer, context, retrieved,query_emb,embeddings = baskin_gpt_core(
+                    query=query,
+                    frasi=frasi,
+                    embeddings=embeddings,
+                    model_emb=model,
+                    model_llm_name=model_llm_name,
+                    top_k=5,
+                    min_similarity=0.2,
+                    pwd=pwd
+                )
+    
+                # Show answer
+                st.subheader("Risposta")
+                st.markdown(answer)
+    
+                # Optional debug / transparency section
+                with st.expander("Contesto recuperato"):
+                    st.text(context)
+    
+                with st.expander("Frasi più rilevanti"):
+                    for i, (sentence, score) in enumerate(retrieved, start=1):
+                        st.write(f"{i}. **Score:** {score:.3f}")
+                        st.write(sentence)
                 
-                st.plotly_chart(fig,key=str(uuid.uuid4()))
-
-        except Exception as e:
-            st.error(f"❌ Errore nell'esecuzione del modello: {e}")
+                with st.expander("Grafico"):
+                    fig=viz(query_emb,embeddings,query,retrieved)
+                    
+                    st.plotly_chart(fig,key=str(uuid.uuid4()))
+    
+            except Exception as e:
+                st.error(f"❌ Errore nell'esecuzione del modello: {e}")

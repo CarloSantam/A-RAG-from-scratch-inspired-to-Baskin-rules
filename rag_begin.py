@@ -20,16 +20,6 @@ import plotly.graph_objects as go
 # OpenAI client setup
 # =========================
 
-# Get the API key from the env
-pwd = os.getenv("openai_key")
-
-if not pwd:
-    raise ValueError("OpenAI API key not found in keyring.")
-
-client = OpenAIClient(
-    api_key=pwd,
-    model="gpt-4o-mini",
-)
 
 # =========================
 # Embedding utilities
@@ -340,7 +330,8 @@ def baskin_gpt_core(
     model_emb,
     model_llm_name: str ,
     top_k: int = 5,
-    min_similarity: Optional[float] = 0.2
+    min_similarity: Optional[float] = 0.2,
+    pwd: str= '',
 ) -> Tuple[str, str, List[Tuple[str, float]]]:
     """
     Answer a query using retrieved context and OpenAI.
@@ -408,6 +399,10 @@ def baskin_gpt_core(
         
         )
 
+    
+    client = OpenAIClient(
+        api_key=pwd
+        )
     
     agent = Agent(
     name="kb_assistant",
