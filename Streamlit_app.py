@@ -10,8 +10,8 @@ import uuid
 # =========================
 
 st.set_page_config(
-    page_title="A Rag Inspired to Baskin",
-    page_icon="🏀",
+    page_title="A Rag Inspired to Quidditch",
+    page_icon="🧹",
     layout="centered"
 )
 
@@ -41,12 +41,12 @@ def load_data_and_emb():
     Load the knowledge base and its embeddings.
     If embeddings are not found, compute and save them.
     """
-    json_path = "baskin_regolamento.json"
+    json_path = "Quidditch_regolamento.json"
     emb_path = "embeddings_db"
 
     # Check that the JSON file exists
     if not os.path.exists(json_path):
-        st.error("⚠️ File `baskin_regolamento.json` non trovato nel repository.")
+        st.error("⚠️ File `Quidditch_regolamento.json` non trovato nel repository.")
         st.stop()
 
     # Load JSON content
@@ -83,19 +83,16 @@ frasi, embeddings = load_data_and_emb()
 st.markdown(
     """
     <div style="font-size: 2em; font-weight: bold; display: flex; align-items: center;">
-        A Rag Inspired to Baskin
+        A Rag Inspired to Quidditch
     </div>
     """,
     unsafe_allow_html=True
 )
 
-st.write("Fai una domanda sul baskin e ricevi una risposta basata sul contesto.")
+st.write("Fai una domanda sul Quidditch e ricevi una risposta basata sul contesto.")
 
 st.write(
     "Questa web app è **non ufficiale** ed è solo un esperimento dell'autore. "
-    "Non prendere ciò che viene riportato come vero sempre e comunque e consulta **sempre** "
-    "come unica fonte autorevole il regolamento ufficiale: "
-    "https://eisi.it/sport/baskin/"
 )
 
 pwd = st.text_input("Inserisci la tua OPEN AI KEY:",type="password")
@@ -121,7 +118,7 @@ if pwd:
         with st.spinner("Sto pensando..."):
             try:
                 # Generate answer, retrieved context, and ranked chunks
-                answer, context, retrieved,query_emb,embeddings = baskin_gpt_core(
+                answer, context, retrieved,query_emb,embeddings = Quidditch_gpt_core(
                     query=query,
                     frasi=frasi,
                     embeddings=embeddings,
