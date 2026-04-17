@@ -1,192 +1,425 @@
+import os
+from pathlib import Path
+from typing import List, Tuple, Optional
+
 import numpy as np
+import pandas as pd
+
+from datapizza.agents import Agent
+from datapizza.clients.openai import OpenAIClient
+
 from sklearn.decomposition import PCA
 from sklearn.manifold import TSNE
+from sklearn.metrics.pairwise import cosine_similarity
+
 import plotly.express as px
 from plotly.subplots import make_subplots
 import plotly.graph_objects as go
-from sklearn.metrics.pairwise import cosine_similarity
-from langchain_openai import ChatOpenAI
-from langchain_core.messages import SystemMessage, HumanMessage
+
+# =========================
+# OpenAI client setup
+# =========================
+
+# Get the API key from the env
+pwd = os.getenv("openai_key")
+
+if not pwd:
+    raise ValueError("OpenAI API key not found in keyring.")
+
+client = OpenAIClient(
+    api_key=pwd,
+    model="gpt-4o-mini",
+)
+
+# =========================
+# Embedding utilities
+# =========================
+
+def _ensure_2d_array(x: np.ndarray) -> np.ndarray:
+    """
+    Ensure that the input is a 2D numpy array.
+    """
+    x = np.asarray(x)
+    if x.ndim == 1:
+        x = x.reshape(1, -1)
+    return x
 
 
-def index_database(frasi, path,model):
-    # Extract only the text (ignore categories)
-    texts = [f for f in frasi]
-    
-    # Get dense embeddings for the dataset
+def index_database(frasi: List[str], path: str, model) -> np.ndarray:
+    """
+    Compute embeddings for a list of sentences and save them to disk.
+
+    Args:
+        frasi: List of input sentences.
+        path: Base path where embeddings will be saved (without extension).
+        model: Embedding model with an .encode(...) method.
+
+    Returns:
+        A 2D numpy array of embeddings.
+    """
+    if not frasi:
+        raise ValueError("The input sentence list 'frasi' is empty.")
+
+    # Extract text items only
+    texts = [str(f) for f in frasi]
+
+    # Generate embeddings
     embeddings = model.encode(texts)
-    
-    # Save embeddings to disk for later usage
-    np.save(path + ".npy", embeddings)
+    embeddings = _ensure_2d_array(np.asarray(embeddings))
+
+    # Ensure target directory exists
+    save_path = Path(path).with_suffix(".npy")
+    save_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # Save embeddings
+    np.save(save_path, embeddings)
 
     return embeddings
 
-def search(query_emb, embeddings,frasi,top_k=3):
-    # Compute cosine similarities
+
+def load_emb(path: str) -> np.ndarray:
+    """
+    Load embeddings from disk.
+
+    Args:
+        path: Base path of the saved embeddings (without extension).
+
+    Returns:
+        A 2D numpy array of embeddings.
+    """
+    load_path = Path(path).with_suffix(".npy")
+
+    if not load_path.exists():
+        raise FileNotFoundError(f"Embedding file not found: {load_path}")
+
+    dense_vecs = np.load(load_path)
+    return _ensure_2d_array(dense_vecs)
+
+def search(
+    query_emb=[],
+    embeddings=[],
+    frasi=[''],
+    top_k=3,
+    min_similarity=0.2 
+):
+    """
+    Search for the most similar sentences using cosine similarity.
+
+    Args:
+        query_emb: Query embedding, shape (1, d) or (d,).
+        embeddings: Corpus embeddings, shape (n, d).
+        frasi: Original sentence list, length n.
+        top_k: Number of top results to return.
+        min_similarity: Minimum similarity threshold. If None, no filtering is applied.
+
+    Returns:
+        A list of (sentence, similarity_score) tuples.
+    """
+    if len(frasi) == 0:
+        raise ValueError("'frasi' is empty.")
+
+    embeddings = _ensure_2d_array(np.asarray(embeddings))
+    query_emb = _ensure_2d_array(np.asarray(query_emb))
+    
+    print(embeddings.shape)
+    print(query_emb.shape)
+
+    if embeddings.shape[0] != len(frasi):
+        raise ValueError(
+            f"Mismatch between number of embeddings ({embeddings.shape[0]}) "
+            f"and number of sentences ({len(frasi)})."
+        )
+
+    if query_emb.shape[1] != embeddings.shape[1]:
+        raise ValueError(
+            f"Embedding dimension mismatch: query={query_emb.shape[1]}, "
+            f"database={embeddings.shape[1]}."
+        )
+
+    # Compute cosine similarity between query and corpus
     similarities = cosine_similarity(query_emb, embeddings)[0]
-    
-    # Rank sentences by similarity
-    similarities_results = sorted(
-    [(f, s) for f, s in zip(frasi, similarities) if s > 0.2],
-    key=lambda x: x[1],
-    reverse=True)[:top_k]
-    
-    return similarities_results
 
-def load_emb(path):
-    # Load previously saved embeddings
-    dense_vecs = np.load(path + ".npy")
-    return dense_vecs
+    # Pair each sentence with its similarity score
+    pairs = list(zip(frasi, similarities))
 
-def viz(query_emb, embeddings,query,frasi):
-    # Concatenate query embedding with dataset embeddings
+    # Apply threshold if requested
+    if min_similarity is not None:
+        pairs = [(f, s) for f, s in pairs if s >= min_similarity]
+
+    # Sort by similarity descending and keep top_k
+    pairs = sorted(pairs, key=lambda x: x[1], reverse=True)[:top_k]
+
+    return pairs
+
+
+# =========================
+# Visualization utilities
+# =========================
+
+def viz(query_emb, embeddings, query: str, frasi: List[str]) -> None:
+    """
+    Visualize sentence embeddings and the query in 2D using PCA and t-SNE.
+
+    Args:
+        query_emb: Query embedding, shape (1, d) or (d,).
+        embeddings: Corpus embeddings, shape (n, d).
+        query: Input query string.
+        frasi: List of corpus sentences.
+    """
+    embeddings = _ensure_2d_array(np.asarray(embeddings))
+    query_emb = _ensure_2d_array(np.asarray(query_emb))
+
+    if embeddings.shape[0] != len(frasi):
+        raise ValueError(
+            f"Mismatch between embeddings ({embeddings.shape[0]}) and sentences ({len(frasi)})."
+        )
+
+    if query_emb.shape[1] != embeddings.shape[1]:
+        raise ValueError(
+            f"Embedding dimension mismatch: query={query_emb.shape[1]}, "
+            f"database={embeddings.shape[1]}."
+        )
+
+    # Combine corpus embeddings and query embedding
     all_vecs = np.vstack([embeddings, query_emb])
-    
-    # PCA reduction to 2D
+
+    # PCA projection
     pca = PCA(n_components=2)
     pca_vecs = pca.fit_transform(all_vecs)
-    
-    # t-SNE reduction to 2D
-    tsne = TSNE(n_components=2, random_state=42, perplexity=2, n_iter=1000)
+
+    # t-SNE projection
+    # Perplexity must be smaller than the number of samples
+    n_samples = all_vecs.shape[0]
+    perplexity = max(1, min(5, n_samples - 1))
+
+    tsne = TSNE(
+        n_components=2,
+        random_state=42,
+        perplexity=perplexity,
+        init="pca",
+        learning_rate="auto"
+    )
     tsne_vecs = tsne.fit_transform(all_vecs)
-    
-    # Create subplot structure
+
+    # Create a figure with two subplots
     fig = make_subplots(rows=1, cols=2, subplot_titles=("PCA", "t-SNE"))
-    
-    # PCA: blue for dataset, red diamond for query
+
+    # PCA plot for dataset points
     fig.add_trace(
         go.Scatter(
             x=pca_vecs[:-1, 0],
             y=pca_vecs[:-1, 1],
-            mode='markers+text',
-            text=[f for f in frasi],  # show sentences
+            mode="markers+text",
+            text=frasi,
             textposition="top center",
-            marker=dict(color='blue', size=8)
+            marker=dict(color="blue", size=8),
+            name="Sentences"
         ),
-        row=1, col=1
+        row=1,
+        col=1
     )
+
+    # PCA plot for query point
     fig.add_trace(
         go.Scatter(
             x=[pca_vecs[-1, 0]],
             y=[pca_vecs[-1, 1]],
-            mode='markers+text',
+            mode="markers+text",
             text=[query],
             textposition="top center",
-            marker=dict(color='red', size=10, symbol='diamond')
+            marker=dict(color="red", size=10, symbol="diamond"),
+            name="Query"
         ),
-        row=1, col=1
+        row=1,
+        col=1
     )
-    
-    # t-SNE: green for dataset, red diamond for query
+
+    # t-SNE plot for dataset points
     fig.add_trace(
         go.Scatter(
             x=tsne_vecs[:-1, 0],
             y=tsne_vecs[:-1, 1],
-            mode='markers+text',
-            text=[f for f in frasi],
+            mode="markers+text",
+            text=frasi,
             textposition="top center",
-            marker=dict(color='green', size=8)
+            marker=dict(color="green", size=8),
+            name="Sentences"
         ),
-        row=1, col=2
+        row=1,
+        col=2
     )
+
+    # t-SNE plot for query point
     fig.add_trace(
         go.Scatter(
             x=[tsne_vecs[-1, 0]],
             y=[tsne_vecs[-1, 1]],
-            mode='markers+text',
+            mode="markers+text",
             text=[query],
             textposition="top center",
-            marker=dict(color='red', size=10, symbol='diamond')
+            marker=dict(color="red", size=10, symbol="diamond"),
+            name="Query"
         ),
-        row=1, col=2
+        row=1,
+        col=2
     )
-    
-    # Update layout
+
     fig.update_layout(
         title="Sentence Embeddings: PCA vs t-SNE",
         showlegend=False,
+        height=700,
+        width=1400
     )
-    
-    fig.show(renderer='browser')
 
-import pandas as pd
+    return fig
 
-def show_top_k(query_emb, embeddings, frasi, k=5):
-    # Compute similarity scores
-    results = search(query_emb, embeddings,frasi,top_k=k)
-    
-    # Take top-k most similar sentences
-    top_k = results
-    
-    # Convert to DataFrame for easier visualization
-    df = pd.DataFrame([{
-        "Sentence": f,
-        "Similarity": round(sim, 3)
-    } for (f, sim) in top_k])
-    
-    
-    # Create interactive bar chart with Plotly
+
+def show_top_k(
+    query_emb: np.ndarray,
+    embeddings: np.ndarray,
+    frasi: List[str],
+    top_k: int = 5,
+    min_similarity=0.2
+) -> pd.DataFrame:
+    """
+    Display the top-k most similar sentences in a table and bar chart.
+
+    Args:
+        query_emb: Query embedding.
+        embeddings: Corpus embeddings.
+        frasi: List of corpus sentences.
+        k: Number of results to display.
+        min_similarity: Minimum similarity threshold.
+
+    Returns:
+        A pandas DataFrame with top-k results.
+    """
+    results = search(
+        query_emb,
+        embeddings,
+        frasi,
+        top_k,
+        min_similarity
+     )
+
+
+    if not results:
+        print("No results found above the similarity threshold.")
+        return pd.DataFrame(columns=["Sentence", "Similarity"])
+
+    df = pd.DataFrame(
+        [{"Sentence": f, "Similarity": round(float(sim), 3)} for f, sim in results]
+    )
+
+    print(df)
+
     fig = px.bar(
         df,
         x="Similarity",
         y="Sentence",
         orientation="h",
-        title=f"Top {k} most similar sentences to query",
+        title=f"Top {len(df)} most similar sentences to query",
         text="Similarity"
     )
-    
-    # Reverse axis for better readability (highest on top)
+
+    # Put the most similar item at the top
     fig.update_yaxes(autorange="reversed")
-    
-    fig.show(renderer="browser")
+    fig.show()
 
-def baskin_gpt(model_llm,api_key,temperature):
-    
-    # Create an instance of the OpenAI chat model
-    llm = ChatOpenAI(
-        model=model_llm,  # or "gpt-4o" or another model name
-        temperature=temperature,       # controls randomness of the output
-        api_key=api_key  # you can also use environment variable
-    )
-    
-    return llm
-    
-def baskin_gpt_core(query, frasi, embeddings, model_emb, llm):
-    # 1. Encode the query into embeddings
-    # query_emb = model_emb.encode([query])['dense_vecs']
-        
+    return df
+
+
+# =========================
+# LLM answer generation
+# =========================
+
+def baskin_gpt_core(
+    query: str,
+    frasi: List[str],
+    embeddings: np.ndarray,
+    model_emb,
+    model_llm_name: str ,
+    top_k: int = 5,
+    min_similarity: Optional[float] = 0.2
+) -> Tuple[str, str, List[Tuple[str, float]]]:
+    """
+    Answer a query using retrieved context and OpenAI.
+
+    Args:
+        query: The user's question.
+        frasi: List of context sentences/documents.
+        embeddings: Precomputed embeddings for 'frasi'.
+        model_emb: Embedding model with an .encode(...) method.
+        model_llm_name: OpenAI model name.
+        top_k: Number of retrieved chunks.
+        min_similarity: Minimum similarity threshold for retrieval.
+
+    Returns:
+        A tuple containing:
+        - generated answer
+        - retrieved context string
+        - retrieved (sentence, similarity) pairs
+    """
+    if not query or not query.strip():
+        raise ValueError("Query is empty.")
+
+    if not frasi:
+        raise ValueError("'frasi' is empty.")
+
+    embeddings = _ensure_2d_array(np.asarray(embeddings))
+
+    # Encode the query
     query_emb = model_emb.encode([query])
+    query_emb = _ensure_2d_array(np.asarray(query_emb))
 
+    # Retrieve the top-k most relevant contexts
+    retrieved = search(
+        query_emb,
+        embeddings,
+        frasi,
+        top_k,
+        min_similarity
+    )
 
-    # 2. Retrieve most similar contexts
-    retrieved = search(query_emb, embeddings, frasi, top_k=10)
+    # Fallback if nothing passes the threshold
+    if not retrieved:
+       retrieved = search(
+           query_emb,
+           embeddings,
+           frasi,
+           top_k,
+           None
+       )
+
     
-    # 3. Build the context string
+    
+    texts = [str(f) for f in retrieved]    
+    
+    embeddings_retr= model_emb.encode(texts)
+
+
     context = "\n".join([r[0] for r in retrieved])
-    
-    
-        
-    # 5. Define system and user prompts
-    system_prompt = (
-        "Sei un esperto di Baskin. Usa il contesto per rispondere alla domanda. "
-        "Rispondi solo a domande relative a questo argomento, ovvero al Baskin."
-        "Se si parla di altro rispondi: 'Non ho i permessi per parlare di questo argomento"
-        "il mio padrone grandissimo, bellissimo e stupendo mi ha detto di parlare solo di Baskin."
-    )    
-    user_prompt = f"""Domanda: {query}
-Contesto:
-{context}
 
-Risposta:"""
+    prompt = (
+        "Sei un esperto di Baskin. Rispondi in modo chiaro e preciso, "
+        "usando solo le informazioni fornite nel contesto. "
+        "Se il contesto non contiene la risposta, dillo esplicitamente.\n\n"
+        f"Contesto:\n{context}\n\n"
+        
+        )
+
     
-    messages = [
-        SystemMessage(content=system_prompt),
-        HumanMessage(content=user_prompt)
-    ]
+    agent = Agent(
+    name="kb_assistant",
+    client=client,
+    system_prompt=prompt,
+    )    
     
-    # 6. Get response
-    response = llm.invoke(messages)
     
-    # 7. Return both the generated response and the context used
-    return response.content
-    
+    result = agent.run(
+    f"Domanda: {query}\n\n"
+    "Risposta:")
+
+    answer = result.text
+
+    return answer, context, retrieved, query_emb,embeddings_retr

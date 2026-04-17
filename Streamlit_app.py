@@ -2,55 +2,87 @@ from rag_begin import *
 import streamlit as st
 import os
 import json
-
 from FlagEmbedding import FlagModel
+import uuid
 
+# =========================
 # Page configuration
+# =========================
+
 st.set_page_config(
     page_title="Baskin GPT",
-    page_icon="https://th.bing.com/th/id/ODF.Mb6JbTIPFbF1KTz4TvJWFQ?w=32&h=32&qlt=90&pcl=fffffa&o=6&pid=1.2"
+    page_icon="🏀",
+    layout="centered"
 )
+
+
+# =========================
+# Load embedding model
+# =========================
 
 @st.cache_resource
 def load_model():
-    return FlagModel('intfloat/multilingual-e5-small', use_fp16=True)
+    """
+    Load and cache the embedding model.
+    """
+    return FlagModel("intfloat/multilingual-e5-small", use_fp16=True)
 
-model=load_model()
 
-# ---------------------------
+model = load_model()
+
+
+# =========================
 # Load data and embeddings
-# ---------------------------
+# =========================
+
 @st.cache_resource
 def load_data_and_emb():
-    # Check JSON exists
-    if not os.path.exists("baskin_regolamento.json"):
+    """
+    Load the knowledge base and its embeddings.
+    If embeddings are not found, compute and save them.
+    """
+    json_path = "baskin_regolamento.json"
+    emb_path = "embeddings_db"
+
+    # Check that the JSON file exists
+    if not os.path.exists(json_path):
         st.error("⚠️ File `baskin_regolamento.json` non trovato nel repository.")
         st.stop()
 
-    with open("baskin_regolamento.json", encoding="utf-8") as f:
+    # Load JSON content
+    with open(json_path, encoding="utf-8") as f:
         data = json.load(f)
 
-    # Extract sentences
-    frasi = [item["sentence"] for item in data]
+    # Extract sentence list from JSON
+    try:
+        frasi = [item["sentence"] for item in data]
+    except (TypeError, KeyError):
+        st.error("⚠️ Il file JSON non ha il formato atteso. Ogni elemento deve contenere la chiave `sentence`.")
+        st.stop()
 
-    # Check if embeddings already exist
-    if os.path.exists("embeddings_db.npy"):
-        embeddings = load_emb("embeddings_db")
+    if not frasi:
+        st.error("⚠️ Il file JSON è vuoto o non contiene frasi valide.")
+        st.stop()
+
+    # Load precomputed embeddings if available, otherwise create them
+    if os.path.exists(f"{emb_path}.npy"):
+        embeddings = load_emb(emb_path)
     else:
-        embeddings = index_database(frasi, "embeddings_db",model)
+        embeddings = index_database(frasi, emb_path, model)
 
     return frasi, embeddings
 
+
 frasi, embeddings = load_data_and_emb()
 
-# ---------------------------
+
+# =========================
 # App UI
-# ---------------------------
+# =========================
+
 st.markdown(
     """
     <div style="font-size: 2em; font-weight: bold; display: flex; align-items: center;">
-        <img src="https://th.bing.com/th/id/ODF.Mb6JbTIPFbF1KTz4TvJWFQ?w=32&h=32&qlt=90&pcl=fffffa&o=6&pid=1.2" 
-             width="32" height="32" style="margin-right:10px;">
         Baskin GPT
     </div>
     """,
@@ -61,100 +93,53 @@ st.write("Fai una domanda sul baskin e ricevi una risposta basata sul contesto."
 
 st.write(
     "Questa web app è **non ufficiale** ed è solo un esperimento dell'autore. "
-    "Non prendere ciò che viene riportato come vero sempre e comunque e consultare **sempre** come unica fonte autorevole il regolamento ufficiale: "
+    "Non prendere ciò che viene riportato come vero sempre e comunque e consulta **sempre** "
+    "come unica fonte autorevole il regolamento ufficiale: "
     "https://eisi.it/sport/baskin/"
 )
 
+# User input
+query = st.text_input("Inserisci la tua domanda:")
 
-# -------------------------
-# LAYOUT — Three columns
-# -------------------------
-col1, col2, col3 = st.columns([2, 3, 2])
+# OpenAI model name
+model_llm_name = "gpt-5.1"
 
-# -------------------------
-# LEFT COLUMN — API KEY
-# -------------------------
-with col1:
-    st.header("🔑 Inserisci la tua API Key")
 
-    # Text input for API Key (hidden for security)
-    api_key = st.text_input(
-        "OpenAI API Key:", 
-        type="password",
-        help="Crea la tua chiave su https://platform.openai.com/account/api-keys"
-    )
+# =========================
+# Run QA pipeline
+# =========================
 
-    if api_key:
-        st.success("✅ API Key inserita correttamente!")
-    else:
-        st.info("Inserisci la tua chiave per continuare.")
+if query:
+    with st.spinner("Sto pensando..."):
+        try:
+            # Generate answer, retrieved context, and ranked chunks
+            answer, context, retrieved,query_emb,embeddings = baskin_gpt_core(
+                query=query,
+                frasi=frasi,
+                embeddings=embeddings,
+                model_emb=model,
+                model_llm_name=model_llm_name,
+                top_k=5,
+                min_similarity=0.2
+            )
 
-# -------------------------
-# MIDDLE COLUMN — MODEL SELECTION
-# -------------------------
-with col2:
-    st.header("🤖 Seleziona il modello OpenAI")
+            # Show answer
+            st.subheader("Risposta")
+            st.markdown(answer)
 
-    # For LangChain we cannot list models dynamically (no client.models.list)
-    # So we define a static list of common models
-    available_models = [
-        "gpt-4o",
-        "gpt-4o-mini",
-        "gpt-4-turbo",
-        "gpt-3.5-turbo"
-    ]
+            # Optional debug / transparency section
+            with st.expander("Contesto recuperato"):
+                st.text(context)
 
-    model_llm = st.selectbox(
-        "Scegli un modello:",
-        options=available_models,
-        index=1,
-        help="Seleziona il modello da usare"
-    )
+            with st.expander("Frasi più rilevanti"):
+                for i, (sentence, score) in enumerate(retrieved, start=1):
+                    st.write(f"{i}. **Score:** {score:.3f}")
+                    st.write(sentence)
+            
+            with st.expander("Grafico"):
+                fig=viz(query_emb,embeddings,query,retrieved)
+                
+                st.plotly_chart(fig,key=str(uuid.uuid4()))
 
-    st.write(f"🧠 Modello selezionato: **{model_llm}**")
-    
-
-# -------------------------
-# RIGHT COLUMN — TEMPERATURE CONTROL
-# -------------------------
-with col3:
-    st.header("🌡️ Temperatura")
-
-    temperature = st.slider(
-        "Imposta la temperatura:",
-        min_value=0.0,
-        max_value=1.0,
-        value=0.3,
-        step=0.05,
-        help=(
-            "Valori bassi → risposte più precise e prevedibili.\n"
-            "Valori alti → risposte più creative e variabili."
-        )
-    )
-
-    st.write(f"Temperatura attuale: **{temperature}**")
-
-# -------------------------
-# CONFIG SUMMARY
-# -------------------------
-if api_key:
-    st.divider()
-    st.subheader("📋 Configurazione attuale")
-    st.write(f"**Modello:** {model_llm}")
-    st.write(f"**Temperatura:** {temperature}")
-
-    # Create the LangChain LLM instance
-    # This replaces the direct OpenAI API call
-    llm=baskin_gpt(model_llm,api_key,temperature)
-
-    # Example usage: user prompt
-    user_prompt = st.text_input("🗣️ Inserisci un prompt per testare il modello:")
-
-    if st.button("Esegui il modello"):
-        with st.spinner("Generazione in corso..."):
-            response = baskin_gpt_core(user_prompt, frasi, embeddings, model, llm)
-        st.success("Risposta generata:")
-        st.write(response)
-
-else:
-    st.warning("⚠️ Inserisci prima la tua API Key per attivare il modello.")
+        except Exception as e:
+            st.error(f"❌ Errore nell'esecuzione del modello: {e}")
