@@ -2,7 +2,6 @@ from rag_begin import *
 import streamlit as st
 import os
 import json
-from FlagEmbedding import FlagModel
 import uuid
 
 # =========================
