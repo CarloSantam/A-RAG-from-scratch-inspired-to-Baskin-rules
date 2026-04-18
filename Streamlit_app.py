@@ -19,21 +19,6 @@ pwd = st.text_input("Inserisci la tua OPEN AI KEY:",type="password")
 
 
 # =========================
-# Load embedding model
-# =========================
-
-@st.cache_resource
-def load_model():
-    """
-    Load and cache the embedding model.
-    """
-    return FlagModel("intfloat/multilingual-e5-small", use_fp16=True)
-
-
-model = load_model()
-
-
-# =========================
 # Load data and embeddings
 # =========================
 
