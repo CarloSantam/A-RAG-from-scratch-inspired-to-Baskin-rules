@@ -67,7 +67,7 @@ def index_database(frasi: List[str], path: str, model,pwd:str) -> np.ndarray:
     # # Save embeddings
     # np.save(save_path, embeddings)
     
-    response=client.embeddigs.create(model="text-embedding-3-small",  # oppure "text-embedding-3-large"
+    response=client.embeddigs.create(model,  #"text-embedding-3-large"
         input=texts
     )
     
