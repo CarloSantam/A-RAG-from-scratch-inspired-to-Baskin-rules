@@ -18,6 +18,9 @@ st.set_page_config(
 
 pwd = st.text_input("Inserisci la tua OPEN AI KEY:",type="password")
 
+if not pwd:
+    st.warning("Inserisci la tua OPEN AI KEY per continuare.")
+    st.stop()  # # stop execution here
 
 # =========================
 # Load data and embeddings
