@@ -27,7 +27,7 @@ conda activate rag
 pip install -r requirements.txt
 
 streamlit run Streamlit_app.py
-```bash
+```
 
 ## WebApp
 
