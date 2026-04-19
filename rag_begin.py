@@ -132,6 +132,11 @@ def Quidditch_gpt_core(
             min_similarity=None
         )
 
+    
+    texts = [str(f) for f in retrieved]    
+    
+    embeddings_retr= get_openai_embeddings(texts,model,pwd)
+    
     context = "\n".join([r[0] for r in retrieved])
 
     prompt = (
@@ -156,7 +161,7 @@ def Quidditch_gpt_core(
 
     answer = result.text
 
-    return answer, context, retrieved, query_emb,embeddings
+    return answer, context, retrieved, query_emb,embeddings_retr
 
 
 # =========================
