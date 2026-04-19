@@ -156,4 +156,4 @@ def Quidditch_gpt_core(
 
     answer = result.text
 
-    return answer, context, retrieved, query_emb
+    return answer, context, retrieved, query_emb,embeddings
