@@ -27,3 +27,14 @@ conda activate rag
 pip install -r requirements.txt
 
 streamlit run Streamlit_app.py
+```bash
+
+## WebApp
+
+If you don't have Anaconda installed, here you can find deployed app on Streamlit Cloud Community:
+
+https://a-rag-from-scratch-inspired.streamlit.app/
+
+or Render:
+
+https://a-rag-from-scratch-inspired-to-quidditch-0glq.onrender.com/
